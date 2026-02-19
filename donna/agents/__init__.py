@@ -39,6 +39,8 @@ class AgentPipeline:
 
         # Per-agent conversation history (session-scoped)
         self._history: dict[str, list[Message]] = {name: [] for name in self._agents}
+        # Shared conversation log — so agents know what happened before
+        self._shared_log: list[dict[str, str]] = []
 
     def handle(self, user_input: str, use_critic: bool = False) -> str:
         """Route the input to the correct agent and return the response.
@@ -62,24 +64,49 @@ class AgentPipeline:
             agent = self._agents["coder"]
             agent_name = "coder"
 
-        # 2. Run the ReAct loop
+        # 2. Build cross-agent context if there's prior conversation
+        augmented_msg = cleaned_msg
+        if self._shared_log:
+            # Include recent conversation context so the agent knows
+            # what happened with other agents
+            recent = self._shared_log[-3:]  # Last 3 exchanges
+            context_lines = []
+            for entry in recent:
+                context_lines.append(
+                    f"[@{entry['agent']}] User asked: {entry['user']}\n"
+                    f"[@{entry['agent']}] Responded: {entry['response'][:500]}"
+                )
+            context = "\n\n".join(context_lines)
+            augmented_msg = (
+                f"[Previous conversation context]\n{context}\n\n"
+                f"[Current request]\n{cleaned_msg}"
+            )
+
+        # 3. Run the ReAct loop
         response = agent.run(
-            user_message=cleaned_msg,
+            user_message=augmented_msg,
             history=self._history.get(agent_name),
         )
 
-        # 3. Optional critic review
+        # 4. Optional critic review
         if use_critic and response:
             response = self.critic.review(response, cleaned_msg)
 
-        # 4. Update session history
+        # 5. Update session history
         from donna.models.base import Role
         self._history.setdefault(agent_name, []).extend([
             Message(role=Role.USER, content=cleaned_msg),
             Message(role=Role.ASSISTANT, content=response),
         ])
 
-        # 5. Render
+        # 6. Update shared log
+        self._shared_log.append({
+            "agent": agent_name,
+            "user": cleaned_msg,
+            "response": response,
+        })
+
+        # 7. Render
         agent.render_response(response)
 
         return response
