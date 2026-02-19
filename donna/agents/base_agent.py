@@ -79,8 +79,19 @@ class BaseAgent:
     # ------------------------------------------------------------------
 
     def _build_system_message(self) -> str:
-        """Assemble the full system prompt with grudge feedback."""
+        """Assemble the full system prompt with system info and grudge feedback."""
+        import os
+        import platform
+
         parts: list[str] = [self._system_prompt]
+
+        # Inject real system info so the LLM knows the environment
+        parts.append(f"\n\n## System Environment")
+        parts.append(f"- OS: {platform.system()} {platform.release()}")
+        parts.append(f"- User: {os.getenv('USERNAME', os.getenv('USER', 'unknown'))}")
+        parts.append(f"- Home: {os.path.expanduser('~')}")
+        parts.append(f"- CWD: {os.getcwd()}")
+        parts.append(f"- Shell: PowerShell (Windows)" if platform.system() == "Windows" else f"- Shell: {os.getenv('SHELL', '/bin/bash')}")
 
         # Inject grudge feedback
         feedback = read_feedback(self.name)

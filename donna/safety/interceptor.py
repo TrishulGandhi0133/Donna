@@ -67,9 +67,20 @@ class SafetyInterceptor:
     def classify(self, tool_entry: ToolEntry, tool_call: ToolCall) -> str:
         """Return ``"green"`` or ``"red"`` for a given tool call.
 
-        A green tool can be promoted to red if its arguments look
-        dangerous (e.g. ``execute_shell("rm -rf /")``)
+        For ``execute_shell``, uses smart classification:
+        - Safe read-only commands (systeminfo, echo, dir) → green
+        - Unknown or dangerous commands → red
+
+        For other tools, uses the registry safety field + argument scanning.
         """
+        # Special handling for execute_shell — dynamic classification
+        if tool_call.name == "execute_shell":
+            from donna.tools.shell_exec import _is_safe_command
+            command = tool_call.arguments.get("command", "")
+            if _is_safe_command(command):
+                return "green"
+            return "red"
+
         if tool_entry.safety == "red":
             return "red"
         # Promote green → red if arguments contain dangerous keywords

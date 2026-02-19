@@ -20,10 +20,16 @@ class TestSafetyClassification:
         tc = ToolCall(id="1", name="read_file", arguments={"path": "test.txt"})
         assert self.interceptor.classify(entry, tc) == "green"
 
-    def test_red_tool_classified_red(self) -> None:
+    def test_safe_shell_command_classified_green(self) -> None:
         entry = get_tool("execute_shell")
         assert entry is not None
-        tc = ToolCall(id="2", name="execute_shell", arguments={"command": "echo hi"})
+        tc = ToolCall(id="2", name="execute_shell", arguments={"command": "systeminfo"})
+        assert self.interceptor.classify(entry, tc) == "green"
+
+    def test_dangerous_shell_command_classified_red(self) -> None:
+        entry = get_tool("execute_shell")
+        assert entry is not None
+        tc = ToolCall(id="2b", name="execute_shell", arguments={"command": "pip install flask"})
         assert self.interceptor.classify(entry, tc) == "red"
 
     def test_green_tool_promoted_to_red_on_dangerous_args(self) -> None:

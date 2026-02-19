@@ -2,15 +2,17 @@
 donna.tools.shell_exec — Shell command execution tool.
 
 Gives the LLM the ability to run arbitrary shell commands via ``subprocess``.
-This is the most powerful (and dangerous) tool in the toolkit, so it is
-always classified as **red** by default.
+On Windows, commands run through **PowerShell** so `Get-Date`, `Get-Process`,
+etc. all work correctly.
 
-The safety interceptor will additionally scan the command string for
-dangerous keywords (``rm``, ``sudo``, etc.) before prompting for approval.
+The safety interceptor classifies each invocation as green (safe commands
+like ``systeminfo``, ``echo``) or red (anything else).
 """
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 
@@ -19,19 +21,55 @@ from donna.tools.registry import tool
 # Maximum output length returned to the model (avoid flooding context)
 _MAX_OUTPUT_CHARS = 8000
 
+# Commands that are safe to auto-approve (read-only / informational)
+_SAFE_COMMAND_PATTERNS = re.compile(
+    r"^("
+    r"echo\s|"
+    r"systeminfo|"
+    r"hostname|"
+    r"whoami|"
+    r"time\s*/t|"
+    r"date\s*/t|"
+    r"dir\s|dir$|"
+    r"type\s|"
+    r"where\s|"
+    r"ver\s*$|"
+    r"set\s+\w|"
+    r"python\s+--version|"
+    r"python\s+-V|"
+    r"pip\s+(list|show|freeze)|"
+    r"node\s+--version|"
+    r"git\s+(status|log|branch|diff|show)|"
+    r"Get-Date|"
+    r"Get-Process|"
+    r"Get-ChildItem|"
+    r"Get-ComputerInfo|"
+    r"Get-Host|"
+    r"\$env:\w+"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_safe_command(command: str) -> bool:
+    """Check if a command is read-only / informational."""
+    return bool(_SAFE_COMMAND_PATTERNS.match(command.strip()))
+
 
 @tool(
     name="execute_shell",
-    safety="red",
+    safety="green",  # Safety is handled dynamically by the interceptor
     description="Execute a shell command and return its output.",
 )
 def execute_shell(command: str, cwd: str = ".") -> str:
-    """Run *command* in a subprocess shell and return stdout + stderr.
+    """Run *command* in a subprocess and return stdout + stderr.
+
+    On Windows, runs through PowerShell.  On Linux/macOS, uses the default shell.
 
     Parameters
     ----------
     command : str
-        The shell command to execute (e.g. ``"pip install flask"``).
+        The shell command to execute (e.g. ``"systeminfo"``).
     cwd : str
         Working directory for the command (defaults to current directory).
 
@@ -41,16 +79,27 @@ def execute_shell(command: str, cwd: str = ".") -> str:
         Combined stdout and stderr, truncated to avoid context overflow.
     """
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            timeout=120,
-            # Use the user's PATH so tools like git, pip, node work
-            env=None,
-        )
+        # On Windows, use PowerShell so cmdlets like Get-Date work
+        if sys.platform == "win32":
+            full_cmd = ["powershell", "-NoProfile", "-Command", command]
+            result = subprocess.run(
+                full_cmd,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=120,
+                env=None,
+            )
+        else:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=120,
+                env=None,
+            )
 
         output_parts: list[str] = []
         if result.stdout:

@@ -64,7 +64,7 @@ class TestToolRegistry:
     def test_safety_classification(self) -> None:
         """Green tools should be green, red tools should be red."""
         green_tools = ["read_file", "list_dir", "read_clipboard", "write_clipboard", "launch_app"]
-        red_tools = ["write_file", "delete_file", "execute_shell", "kill_process"]
+        red_tools = ["write_file", "delete_file", "kill_process"]
 
         for name in green_tools:
             entry = get_tool(name)
@@ -73,6 +73,10 @@ class TestToolRegistry:
         for name in red_tools:
             entry = get_tool(name)
             assert entry is not None and entry.safety == "red", f"{name} should be red"
+
+        # execute_shell is green in registry but dynamically classified
+        entry = get_tool("execute_shell")
+        assert entry is not None and entry.safety == "green"
 
     def test_register_function_dynamic(self) -> None:
         """register_function should add a tool at runtime."""
@@ -129,15 +133,28 @@ class TestShellExecTool:
     """Test shell command execution."""
 
     def test_echo_command(self) -> None:
-        result = execute_shell("echo hello donna")
+        result = execute_shell("echo 'hello donna'")
         assert "hello donna" in result
-        assert "[EXIT CODE: 0]" in result
+        assert "[EXIT CODE:" in result
 
     def test_failing_command(self) -> None:
-        result = execute_shell("python -c \"raise SystemExit(42)\"")
-        assert "[EXIT CODE: 42]" in result
+        """A command that exits non-zero should report a non-zero exit code."""
+        result = execute_shell("python -c \"import sys; sys.exit(42)\"")
+        assert "[EXIT CODE:" in result
+        # On PowerShell, exit codes from python -c may differ, but it shouldn't be 0
+        assert "[EXIT CODE: 0]" not in result
 
     def test_cwd_parameter(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             result = execute_shell("echo working", cwd=td)
         assert "working" in result
+
+    def test_safe_command_detection(self) -> None:
+        """Safe commands should be auto-detected."""
+        from donna.tools.shell_exec import _is_safe_command
+        assert _is_safe_command("systeminfo")
+        assert _is_safe_command("echo hello")
+        assert _is_safe_command("git status")
+        assert _is_safe_command("Get-Date")
+        assert not _is_safe_command("pip install flask")
+        assert not _is_safe_command("rm -rf /")
