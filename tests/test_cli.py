@@ -1,0 +1,45 @@
+"""Tests for donna.cli — Typer CLI commands."""
+
+from __future__ import annotations
+
+from typer.testing import CliRunner
+
+from donna.cli import app
+
+runner = CliRunner()
+
+
+class TestCLI:
+    """Test the Typer sub-commands."""
+
+    def test_version_flag(self) -> None:
+        """donna --version should print the version and exit 0."""
+        result = runner.invoke(app, ["--version"])
+        assert result.exit_code == 0
+        assert "donna" in result.output.lower()
+
+    def test_info_command(self) -> None:
+        """donna info should print config summary without errors."""
+        result = runner.invoke(app, ["info"])
+        assert result.exit_code == 0
+        # Should mention the model name
+        assert "Model" in result.output or "model" in result.output
+
+    def test_run_command_placeholder(self) -> None:
+        """donna run should accept a prompt and print the placeholder message."""
+        result = runner.invoke(app, ["run", "hello world"])
+        assert result.exit_code == 0
+        assert "hello world" in result.output
+
+    def test_watch_command_placeholder(self) -> None:
+        """donna watch should print a placeholder message."""
+        result = runner.invoke(app, ["watch"])
+        assert result.exit_code == 0
+        assert "Phase 4" in result.output or "not yet" in result.output.lower()
+
+    def test_no_args_shows_help(self) -> None:
+        """donna (no args) should show help text."""
+        result = runner.invoke(app, [])
+        # Typer/Click may return 0 or 2 when displaying help
+        assert result.exit_code in (0, 2)
+        assert "Usage" in result.output or "usage" in result.output.lower()

@@ -1,0 +1,56 @@
+version: 1
+default_model: ollama              # ollama | groq
+
+ollama:
+  base_url: http://localhost:11434
+  model: llama3:8b
+  temperature: 0.2
+
+groq:
+  # Set GROQ_API_KEY in your .env file
+  model: llama-3.3-70b-versatile
+  temperature: 0.3
+
+agents:
+  router:
+    prompt: config/prompts/router.txt
+    model_override: null
+    tools: []
+  coder:
+    prompt: config/prompts/coder.txt
+    model_override: null
+    tools:
+      - read_file
+      - write_file
+      - list_dir
+      - execute_shell
+  sysadmin:
+    prompt: config/prompts/sysadmin.txt
+    model_override: null
+    tools:
+      - execute_shell
+      - read_file
+      - write_file
+      - delete_file
+      - launch_app
+      - kill_process
+  critic:
+    prompt: config/prompts/critic.txt
+    model_override: null
+    tools: []
+
+safety:
+  red_keywords:
+    - rm
+    - sudo
+    - del
+    - format
+    - mkfs
+    - ">"
+  auto_approve_green: true
+  max_red_per_session: 10
+
+memory:
+  feedback_token_budget: 2000
+  vector_top_k: 3
+  chroma_path: data/chroma
