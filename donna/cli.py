@@ -122,9 +122,18 @@ def run(
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Target agent."),  # noqa: UP007
 ) -> None:
     """Run a single prompt and exit (non-interactive)."""
-    # TODO: Phase 3 — wire into agent orchestration
-    console.print(f"[dim]» Prompt:[/dim] {prompt}")
-    console.print("[yellow]⚠  Agent orchestration not yet wired (coming in Phase 3).[/yellow]")
+    from donna.agents import create_pipeline
+
+    # Pin to agent if specified
+    full_prompt = f"@{agent} {prompt}" if agent else prompt
+
+    try:
+        pipeline = create_pipeline(cloud=cloud)
+        pipeline.handle(full_prompt)
+    except Exception as exc:
+        console.print(f"[red]✗ Error: {type(exc).__name__}: {exc}[/red]")
+        console.print("[dim]If using Ollama, make sure it's running. Try --cloud for Groq.[/dim]")
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------

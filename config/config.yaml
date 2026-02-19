@@ -3,7 +3,7 @@ default_model: ollama              # ollama | groq
 
 ollama:
   base_url: http://localhost:11434
-  model: llama3:8b
+  model: llama3.1
   temperature: 0.2
 
 groq:

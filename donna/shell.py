@@ -88,6 +88,16 @@ def start_repl(cloud: bool = False, pinned_agent: str | None = None) -> None:
         complete_while_typing=True,
     )
 
+    # --- Create the agent pipeline ---
+    try:
+        from donna.agents import create_pipeline
+        pipeline = create_pipeline(cloud=cloud)
+        console.print("[dim]✓ Agent pipeline ready.[/dim]\n")
+    except Exception as exc:
+        console.print(f"[red]✗ Failed to create agent pipeline: {exc}[/red]")
+        console.print("[dim]Make sure Ollama is running (or use --cloud for Groq).[/dim]")
+        return
+
     while True:
         try:
             user_input: str = session.prompt(
@@ -110,11 +120,30 @@ def start_repl(cloud: bool = False, pinned_agent: str | None = None) -> None:
             console.print(Markdown(_HELP_TEXT))
             continue
 
-        # ----- agent dispatch (placeholder until Phase 3) ----- #
-        console.print(
-            Panel(
-                f"[dim]Your message:[/dim] {user_input}\n\n"
-                "[yellow]⚠  Agent orchestration not yet wired (coming in Phase 3).[/yellow]",
-                border_style="yellow",
-            )
-        )
+        # ----- @fix / @explain clipboard shortcuts ----- #
+        if lower in ("@fix", "@explain"):
+            try:
+                import pyperclip
+                clip_content = pyperclip.paste()
+                if clip_content:
+                    action = "Fix this error" if lower == "@fix" else "Explain this"
+                    user_input = f"{action}:\n\n```\n{clip_content}\n```"
+                    console.print(f"[dim]📋 Injected {len(clip_content)} chars from clipboard.[/dim]")
+                else:
+                    console.print("[yellow]Clipboard is empty.[/yellow]")
+                    continue
+            except Exception:
+                console.print("[yellow]Could not access clipboard.[/yellow]")
+                continue
+
+        # ----- Pin to a specific agent if requested ----- #
+        if pinned_agent:
+            user_input = f"@{pinned_agent} {user_input}"
+
+        # ----- Dispatch through the agent pipeline ----- #
+        try:
+            pipeline.handle(user_input)
+        except Exception as exc:
+            console.print(f"\n[red]✗ Error: {type(exc).__name__}: {exc}[/red]")
+            console.print("[dim]If using Ollama, make sure it's running. Try --cloud for Groq.[/dim]")
+
