@@ -27,12 +27,19 @@ class TestSafetyClassification:
         assert self.interceptor.classify(entry, tc) == "red"
 
     def test_green_tool_promoted_to_red_on_dangerous_args(self) -> None:
-        """A green tool should be promoted to red if args contain rm, sudo, etc."""
+        """A green tool should be promoted to red if args contain standalone dangerous words."""
         entry = get_tool("read_file")
         assert entry is not None
-        # Even though read_file is green, the path contains "rm" which triggers promotion
-        tc = ToolCall(id="3", name="read_file", arguments={"path": "sudo rm -rf /"})
+        # "rm" as a standalone word should trigger promotion
+        tc = ToolCall(id="3", name="read_file", arguments={"path": "rm -rf /"})
         assert self.interceptor.classify(entry, tc) == "red"
+
+    def test_green_tool_NOT_promoted_on_partial_match(self) -> None:
+        """'del' inside 'models' should NOT trigger promotion (word boundary)."""
+        entry = get_tool("list_dir")
+        assert entry is not None
+        tc = ToolCall(id="3b", name="list_dir", arguments={"path": "donna/models/"})
+        assert self.interceptor.classify(entry, tc) == "green"
 
     def test_unknown_tool_returns_error(self) -> None:
         tc = ToolCall(id="4", name="nonexistent_tool", arguments={})

@@ -51,6 +51,45 @@ def list_dir(path: str = ".") -> str:
 
 
 @tool(
+    name="find_files",
+    safety="green",
+    description="Recursively find files matching a glob pattern (e.g. '*.py', '*.js').",
+)
+def find_files(pattern: str, path: str = ".") -> str:
+    """Recursively search for files matching *pattern* under *path*.
+
+    Parameters
+    ----------
+    pattern : str
+        Glob pattern (e.g. ``"*.py"``, ``"*.txt"``, ``"test_*"``).
+    path : str
+        Root directory to search from (defaults to cwd).
+
+    Returns a list of matching file paths, one per line.
+    """
+    target = Path(path).expanduser().resolve()
+    if not target.exists():
+        return f"[ERROR] Directory not found: {target}"
+
+    matches = sorted(target.rglob(pattern))
+    # Filter out __pycache__, .git, and other noise
+    matches = [
+        m for m in matches
+        if "__pycache__" not in str(m) and ".git" not in str(m)
+    ]
+
+    if not matches:
+        return f"No files matching '{pattern}' found under {target}"
+
+    lines = [f"Found {len(matches)} file(s) matching '{pattern}':\n"]
+    for m in matches[:50]:  # Cap at 50 results
+        lines.append(f"  {m.relative_to(target)}")
+    if len(matches) > 50:
+        lines.append(f"  ... and {len(matches) - 50} more")
+    return "\n".join(lines)
+
+
+@tool(
     name="write_file",
     safety="red",
     description="Write content to a file (creates or overwrites).",

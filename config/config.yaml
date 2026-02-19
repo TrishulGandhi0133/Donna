@@ -23,6 +23,7 @@ agents:
       - read_file
       - write_file
       - list_dir
+      - find_files
       - execute_shell
   sysadmin:
     prompt: config/prompts/sysadmin.txt
@@ -32,6 +33,8 @@ agents:
       - read_file
       - write_file
       - delete_file
+      - list_dir
+      - find_files
       - launch_app
       - kill_process
   critic:

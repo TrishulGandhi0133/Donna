@@ -13,6 +13,7 @@ contain dangerous keywords (``rm``, ``sudo``, ``>``).
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rich.console import Console
@@ -39,6 +40,13 @@ class SafetyInterceptor:
     def __init__(self) -> None:
         settings = get_settings()
         self._red_keywords = [kw.lower() for kw in settings.safety.red_keywords]
+        # Build a single regex with word boundaries to avoid false positives
+        # e.g. "del" should NOT match "models" or "delete" in a path
+        escaped = [re.escape(kw) for kw in self._red_keywords]
+        self._danger_pattern = re.compile(
+            r"(?:^|(?<=\s))(" + "|".join(escaped) + r")(?=\s|$)",
+            re.IGNORECASE,
+        )
         self._auto_approve_green = settings.safety.auto_approve_green
         self.max_red = settings.safety.max_red_per_session
         self.red_count = 0
@@ -48,9 +56,13 @@ class SafetyInterceptor:
     # ------------------------------------------------------------------
 
     def _is_argument_dangerous(self, args: dict[str, Any]) -> bool:
-        """Scan tool arguments for dangerous keywords."""
-        args_str = " ".join(str(v) for v in args.values()).lower()
-        return any(kw in args_str for kw in self._red_keywords)
+        """Scan tool arguments for dangerous keywords using word boundaries.
+
+        Only matches standalone dangerous words — ``"del"`` will NOT match
+        inside ``"models"`` or ``"delete_file"`` path arguments.
+        """
+        args_str = " ".join(str(v) for v in args.values())
+        return bool(self._danger_pattern.search(args_str))
 
     def classify(self, tool_entry: ToolEntry, tool_call: ToolCall) -> str:
         """Return ``"green"`` or ``"red"`` for a given tool call.

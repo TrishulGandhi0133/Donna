@@ -142,6 +142,12 @@ class BaseAgent:
                 # No tool calls → this is the final answer
                 return response.content
 
+            # Append the assistant's response (once, before tool results)
+            messages.append(Message(
+                role=Role.ASSISTANT,
+                content=response.content or "",
+            ))
+
             # Process each tool call
             for tc in response.tool_calls:
                 # Show what the agent is doing
@@ -156,12 +162,6 @@ class BaseAgent:
                 # Show truncated result
                 preview = result[:200] + "..." if len(result) > 200 else result
                 console.print(f"  [dim]   ↳ {preview}[/dim]")
-
-                # Append assistant message with tool call info
-                messages.append(Message(
-                    role=Role.ASSISTANT,
-                    content=response.content or f"Calling {tc.name}",
-                ))
 
                 # Append tool result
                 messages.append(Message(
