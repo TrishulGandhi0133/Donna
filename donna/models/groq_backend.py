@@ -17,9 +17,11 @@ locally.
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from typing import Any
 
-from openai import OpenAI
+from openai import OpenAI, BadRequestError
 
 from donna.models.base import (
     AbstractModel,
@@ -110,6 +112,33 @@ class GroqModel:
             )
         return calls
 
+    @staticmethod
+    def _parse_failed_generation(failed_gen: str) -> list[ToolCall]:
+        """Parse tool calls from Groq's ``failed_generation`` string.
+
+        Groq sometimes returns errors when the model generates tool calls
+        in the ``<function=name {json}</function>`` format.  This method
+        extracts the tool name and arguments from that string.
+
+        Example input:
+            ``<function=find_files {"pattern": "*.py", "path": "."}</function>``
+        """
+        calls: list[ToolCall] = []
+        # Match all <function=name {json}</function> patterns
+        pattern = r'<function=(\w+)\s*(\{[^}]*\})\s*</function>'
+        for match in re.finditer(pattern, failed_gen):
+            name = match.group(1)
+            try:
+                args = json.loads(match.group(2))
+            except json.JSONDecodeError:
+                args = {}
+            calls.append(ToolCall(
+                id=f"call_{uuid.uuid4().hex[:8]}",
+                name=name,
+                arguments=args,
+            ))
+        return calls
+
     # ---- public interface ------------------------------------------------
 
     def chat(
@@ -127,7 +156,30 @@ class GroqModel:
         if tools:
             kwargs["tools"] = self._build_tools(tools)
 
-        response = self._client.chat.completions.create(**kwargs)
+        try:
+            response = self._client.chat.completions.create(**kwargs)
+        except BadRequestError as exc:
+            # Handle Groq's tool_use_failed — the model generated a tool
+            # call but Groq couldn't parse it.  We parse it ourselves.
+            error_body = getattr(exc, "body", None)
+            if isinstance(error_body, dict):
+                failed_gen = error_body.get("error", {}).get("failed_generation", "")
+                if failed_gen:
+                    parsed_calls = self._parse_failed_generation(failed_gen)
+                    if parsed_calls:
+                        return AssistantMessage(
+                            content="",
+                            tool_calls=parsed_calls,
+                            raw={"failed_generation": failed_gen},
+                        )
+
+            # If we can't parse it, retry WITHOUT tools (plain text response)
+            kwargs.pop("tools", None)
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+            except Exception:
+                raise exc  # re-raise the original
+
         choice = response.choices[0]
 
         content = choice.message.content or ""
@@ -142,3 +194,4 @@ class GroqModel:
 
 # Satisfy the Protocol at module level
 _: type[AbstractModel] = GroqModel  # type: ignore[assignment]
+
