@@ -87,8 +87,9 @@ def execute_shell(command: str, cwd: str = ".") -> str:
                 capture_output=True,
                 text=True,
                 cwd=cwd,
-                timeout=120,
+                timeout=60,
                 env=None,
+                stdin=subprocess.DEVNULL,  # Prevent interactive prompts from blocking
             )
         else:
             result = subprocess.run(
@@ -97,8 +98,9 @@ def execute_shell(command: str, cwd: str = ".") -> str:
                 capture_output=True,
                 text=True,
                 cwd=cwd,
-                timeout=120,
+                timeout=60,
                 env=None,
+                stdin=subprocess.DEVNULL,
             )
 
         output_parts: list[str] = []
