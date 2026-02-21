@@ -1,13 +1,13 @@
 """
 donna.cli — Typer-based CLI entry-point.
 
-This is what runs when a user types `donna` in their terminal.
+This is what runs when a user types ``donna`` in their terminal.
 Sub-commands:
 
+    donna setup                 → first-run interactive wizard
     donna chat                  → interactive REPL
-    donna run "fix the tests"   → one-shot prompt (Phase 3)
-    donna watch                 → enter recording mode (Phase 4)
-    donna feedback "..."        → append a correction to the active agent
+    donna run "fix the tests"   → one-shot prompt
+    donna feedback "..."        → append a correction to an agent
     donna info                  → print current config summary
 """
 
@@ -21,7 +21,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from donna import __version__
-from donna.config import get_settings
+from donna.config import get_settings, needs_setup
 
 # ---------------------------------------------------------------------------
 # Typer app
@@ -58,6 +58,35 @@ def main(
     ),
 ) -> None:
     """Donna — your CLI-resident AI agent framework."""
+
+
+# ---------------------------------------------------------------------------
+# donna setup  (first-run wizard)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def setup(
+    reset: bool = typer.Option(False, "--reset", help="Reconfigure from scratch."),
+) -> None:
+    """Run the first-time setup wizard (Groq key, Ollama model)."""
+    from donna.setup import run_setup
+
+    run_setup(reset=reset)
+
+
+# ---------------------------------------------------------------------------
+# Auto-setup guard — prompts setup before chat/run if not configured
+# ---------------------------------------------------------------------------
+
+def _ensure_setup() -> None:
+    """If no config exists, run setup wizard first."""
+    if needs_setup():
+        console.print("[yellow]⚠  Donna is not configured yet.[/yellow]")
+        console.print()
+        from donna.setup import run_setup
+        run_setup()
+        # Clear the cached settings so they reload after setup
+        get_settings.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +135,14 @@ def chat(
     ),
 ) -> None:
     """Start an interactive chat session with Donna."""
+    _ensure_setup()
     from donna.shell import start_repl   # lazy import to keep startup fast
 
     start_repl(cloud=cloud, pinned_agent=agent)
 
 
 # ---------------------------------------------------------------------------
-# donna run  (one-shot — placeholder for Phase 3)
+# donna run  (one-shot)
 # ---------------------------------------------------------------------------
 
 @app.command()
@@ -122,6 +152,7 @@ def run(
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Target agent."),  # noqa: UP007
 ) -> None:
     """Run a single prompt and exit (non-interactive)."""
+    _ensure_setup()
     from donna.agents import create_pipeline
 
     # Pin to agent if specified
@@ -137,17 +168,6 @@ def run(
 
 
 # ---------------------------------------------------------------------------
-# donna watch  (placeholder for Phase 4)
-# ---------------------------------------------------------------------------
-
-@app.command()
-def watch() -> None:
-    """Enter Watch & Learn recording mode."""
-    # TODO: Phase 4
-    console.print("[yellow]⚠  Watch mode not yet implemented (coming in Phase 4).[/yellow]")
-
-
-# ---------------------------------------------------------------------------
 # donna feedback
 # ---------------------------------------------------------------------------
 
@@ -155,8 +175,19 @@ def watch() -> None:
 def feedback(
     correction: str = typer.Argument(..., help="The correction to record."),
     agent: str = typer.Option("coder", "--agent", "-a", help="Which agent this feedback is for."),
+    list_all: bool = typer.Option(False, "--list", help="List all feedback for the agent."),
 ) -> None:
     """Append a correction to an agent's feedback memory."""
+    if list_all:
+        from donna.memory.feedback import read_feedback
+        fb = read_feedback(agent)
+        if fb:
+            console.print(f"[bold]Feedback for @{agent}:[/bold]")
+            console.print(fb)
+        else:
+            console.print(f"[dim]No feedback recorded for @{agent}.[/dim]")
+        return
+
     from donna.memory.feedback import append_feedback  # lazy import
 
     append_feedback(agent_name=agent, text=correction)

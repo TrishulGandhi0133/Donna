@@ -79,19 +79,14 @@ class BaseAgent:
     # ------------------------------------------------------------------
 
     def _build_system_message(self) -> str:
-        """Assemble the full system prompt with system info and grudge feedback."""
-        import os
-        import platform
+        """Assemble the full system prompt with system fingerprint and grudge feedback."""
+        from donna.system.fingerprint import get_fingerprint
 
         parts: list[str] = [self._system_prompt]
 
-        # Inject real system info so the LLM knows the environment
-        parts.append(f"\n\n## System Environment")
-        parts.append(f"- OS: {platform.system()} {platform.release()}")
-        parts.append(f"- User: {os.getenv('USERNAME', os.getenv('USER', 'unknown'))}")
-        parts.append(f"- Home: {os.path.expanduser('~')}")
-        parts.append(f"- CWD: {os.getcwd()}")
-        parts.append(f"- Shell: PowerShell (Windows)" if platform.system() == "Windows" else f"- Shell: {os.getenv('SHELL', '/bin/bash')}")
+        # Inject system fingerprint (auto-detected OS, tools, etc.)
+        fp = get_fingerprint()
+        parts.append(f"\n\n{fp.to_prompt_section()}")
 
         # Inject grudge feedback
         feedback = read_feedback(self.name)
@@ -149,6 +144,42 @@ class BaseAgent:
 
         # Tool schemas
         tools = self._get_tool_schemas()
+
+        # --- Task Planning ---
+        # Ask the agent to plan multi-step tasks before executing
+        if tools:
+            plan_prompt = (
+                "Before acting, briefly assess this task:\n"
+                "- If it's a simple question or single-step task, reply with: PLAN: direct\n"
+                "- If it requires multiple steps, reply with a numbered plan like:\n"
+                "  PLAN:\n"
+                "  1. First step\n"
+                "  2. Second step\n"
+                "  3. Third step\n"
+                "Then proceed to execute."
+            )
+            messages.append(Message(role=Role.USER, content=plan_prompt))
+
+            plan_response: AssistantMessage = self.model.chat(
+                messages=messages, tools=None,  # No tools during planning
+            )
+
+            plan_text = plan_response.content or ""
+            messages.append(Message(role=Role.ASSISTANT, content=plan_text))
+
+            # Show the plan if it's multi-step
+            if plan_text and "PLAN:" in plan_text and "direct" not in plan_text.lower():
+                console.print(f"\n  [dim cyan]📋 Plan:[/dim cyan]")
+                for line in plan_text.split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("PLAN"):
+                        console.print(f"  [dim]{line}[/dim]")
+                console.print()
+
+            # Continue with: "Now execute the plan"
+            messages.append(Message(
+                role=Role.USER, content="Now execute. Use your tools."
+            ))
 
         # --- ReAct loop ---
         consecutive_denials = 0

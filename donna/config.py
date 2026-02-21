@@ -1,10 +1,12 @@
 """
 donna.config — Load, validate, and expose project configuration.
 
-Reads `config/config.yaml` (relative to project root) and `.env`,
-then validates everything through Pydantic models.  The module exposes
-a single `get_settings()` function that returns a cached `DonnaSettings`
-instance.
+Config search order (first found wins):
+1. ``~/.donna/config.yaml``  (user-level, created by ``donna setup``)
+2. ``./config/config.yaml``  (project-level, for development)
+3. Built-in Pydantic defaults
+
+Environment variables override everything (``GROQ_API_KEY``, ``DONNA_MODEL``).
 """
 
 from __future__ import annotations
@@ -22,15 +24,31 @@ from pydantic import BaseModel, Field
 # Path helpers
 # ---------------------------------------------------------------------------
 
-# Project root = the directory containing pyproject.toml.
-# We walk upward from this file (donna/config.py → donna/ → Donna/).
+# User-level config directory
+DONNA_HOME = Path.home() / ".donna"
+
+# Project root (dev mode) = directory containing pyproject.toml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_DIR = PROJECT_ROOT / "config"
-DATA_DIR = PROJECT_ROOT / "data"
+PROJECT_CONFIG_DIR = PROJECT_ROOT / "config"
+
+# Resolve config and data directories based on what exists
+if (DONNA_HOME / "config.yaml").exists():
+    # User installed via pip + ran donna setup
+    CONFIG_DIR = DONNA_HOME
+    DATA_DIR = DONNA_HOME / "data"
+    _ENV_FILE = DONNA_HOME / ".env"
+else:
+    # Developer mode — project-relative paths
+    CONFIG_DIR = PROJECT_CONFIG_DIR
+    DATA_DIR = PROJECT_ROOT / "data"
+    _ENV_FILE = PROJECT_ROOT / ".env"
 
 # Ensure runtime data dirs exist
 for _sub in ("feedback", "chroma", "skills"):
     (DATA_DIR / _sub).mkdir(parents=True, exist_ok=True)
+
+# Prompts are always in the project's config/prompts/ (shipped with package)
+PROMPTS_DIR = PROJECT_CONFIG_DIR / "prompts"
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +82,23 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
 
     def load_system_prompt(self) -> str:
-        """Read the system prompt file from disk."""
+        """Read the system prompt file from disk.
+
+        Searches in order:
+        1. Relative to project root (covers both dev and installed modes)
+        2. Relative to DONNA_HOME
+        """
+        # Try project root first (handles both dev + installed package)
         prompt_path = PROJECT_ROOT / self.prompt
-        if not prompt_path.exists():
-            raise FileNotFoundError(f"System prompt not found: {prompt_path}")
-        return prompt_path.read_text(encoding="utf-8")
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+
+        # Fallback: user-level config
+        prompt_path = DONNA_HOME / self.prompt
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+
+        raise FileNotFoundError(f"System prompt not found: {self.prompt}")
 
 
 class SafetySettings(BaseModel):
@@ -113,21 +143,35 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def needs_setup() -> bool:
+    """Return True if neither user-level nor project-level config exists."""
+    user_config = DONNA_HOME / "config.yaml"
+    project_config = PROJECT_CONFIG_DIR / "config.yaml"
+    project_env = PROJECT_ROOT / ".env"
+
+    # If project .env or config exists, we're in dev mode — no setup needed
+    if project_config.exists() and project_env.exists():
+        return False
+
+    return not user_config.exists()
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> DonnaSettings:
     """Return the validated, cached application settings.
 
     Loading order (each layer overrides the previous):
     1. Built-in defaults (Pydantic field defaults).
-    2. ``config/config.yaml``.
+    2. Config YAML (user-level ``~/.donna/`` or project-level ``config/``).
     3. Environment variables / ``.env`` file.
     """
 
     # 1. Load .env (if present) so env-vars are available to Pydantic
-    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(_ENV_FILE)
 
-    # 2. Parse YAML
-    raw: dict[str, Any] = _load_yaml(CONFIG_DIR / "config.yaml")
+    # 2. Parse YAML — try user-level first, fallback to project-level
+    config_path = CONFIG_DIR / "config.yaml"
+    raw: dict[str, Any] = _load_yaml(config_path)
 
     # 3. Overlay env-var overrides
     if api_key := os.getenv("GROQ_API_KEY"):

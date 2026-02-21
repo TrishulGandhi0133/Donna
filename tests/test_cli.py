@@ -31,11 +31,11 @@ class TestCLI:
         # The command may fail if no LLM backend is available, but it should not crash
         assert result.exit_code in (0, 1)
 
-    def test_watch_command_placeholder(self) -> None:
-        """donna watch should print a placeholder message."""
-        result = runner.invoke(app, ["watch"])
+    def test_setup_command_exists(self) -> None:
+        """donna setup should be a valid command."""
+        result = runner.invoke(app, ["setup", "--help"])
         assert result.exit_code == 0
-        assert "Phase 4" in result.output or "not yet" in result.output.lower()
+        assert "setup" in result.output.lower() or "wizard" in result.output.lower()
 
     def test_no_args_shows_help(self) -> None:
         """donna (no args) should show help text."""

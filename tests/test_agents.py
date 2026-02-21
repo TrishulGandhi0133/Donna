@@ -83,13 +83,18 @@ class TestBaseAgent:
 
     def test_simple_text_response(self) -> None:
         """When the model returns text (no tool calls), loop should return it."""
-        mock_model = _make_mock_model(content="The answer is 42.")
+        # Plan response + final response (planning step adds 1 extra call)
+        plan_response = AssistantMessage(content="PLAN: direct")
+        final_response = AssistantMessage(content="The answer is 42.")
+        mock_model = MagicMock(spec=AbstractModel)
+        mock_model.chat.side_effect = [plan_response, final_response]
+
         safety = SafetyInterceptor()
         agent = BaseAgent(name="coder", model=mock_model, safety=safety)
 
         result = agent.run("What is the answer?")
         assert result == "The answer is 42."
-        mock_model.chat.assert_called_once()
+        assert mock_model.chat.call_count == 2  # plan + answer
 
     def test_system_prompt_includes_feedback(self) -> None:
         """The system prompt should include grudge feedback if present."""
@@ -114,19 +119,21 @@ class TestBaseAgent:
 
     def test_tool_call_loop(self) -> None:
         """When model returns a tool call, agent should execute it and loop."""
-        mock_model = _make_mock_model()
+        # Planning adds 1 call before the ReAct loop
+        plan_response = AssistantMessage(content="PLAN: direct")
 
-        # First call: model wants to call a tool
+        # ReAct call 1: model wants to call a tool
         tool_response = AssistantMessage(
             content="",
             tool_calls=[
                 ToolCall(id="tc1", name="list_dir", arguments={"path": "."})
             ],
         )
-        # Second call: model returns final answer
+        # ReAct call 2: model returns final answer
         final_response = AssistantMessage(content="Here are your files.")
 
-        mock_model.chat.side_effect = [tool_response, final_response]
+        mock_model = MagicMock(spec=AbstractModel)
+        mock_model.chat.side_effect = [plan_response, tool_response, final_response]
 
         safety = SafetyInterceptor()
         agent = BaseAgent(
@@ -138,7 +145,7 @@ class TestBaseAgent:
 
         result = agent.run("list my files")
         assert result == "Here are your files."
-        assert mock_model.chat.call_count == 2
+        assert mock_model.chat.call_count == 3  # plan + tool call + final
 
 
 # ---------------------------------------------------------------------------
