@@ -152,6 +152,8 @@ class BaseAgent:
 
         # --- ReAct loop ---
         consecutive_denials = 0
+        _DESTRUCTIVE_TOOLS = {"write_file", "delete_file"}
+        completed_writes: set[str] = set()  # Track files already written
 
         for step in range(MAX_STEPS):
             response: AssistantMessage = self.model.chat(
@@ -171,7 +173,28 @@ class BaseAgent:
 
             # Process each tool call
             any_denied = False
+            did_destructive = False
+
             for tc in response.tool_calls:
+                # Skip duplicate writes to the same file
+                if tc.name in _DESTRUCTIVE_TOOLS:
+                    target_path = tc.arguments.get("path", "")
+                    if target_path in completed_writes:
+                        result = (
+                            f"[SKIPPED] File '{target_path}' was already written "
+                            "successfully. No need to write again."
+                        )
+                        console.print(
+                            f"  [dim]🔧 @{self.name} → {tc.name}(...) — skipped (already done)[/dim]"
+                        )
+                        messages.append(Message(
+                            role=Role.TOOL,
+                            content=result,
+                            tool_call_id=tc.id,
+                            name=tc.name,
+                        ))
+                        continue
+
                 # Show what the agent is doing
                 args_display = ", ".join(f"{k}={v!r}" for k, v in tc.arguments.items())
                 console.print(
@@ -185,10 +208,15 @@ class BaseAgent:
                 preview = result[:200] + "..." if len(result) > 200 else result
                 console.print(f"  [dim]   ↳ {preview}[/dim]")
 
+                # Track successful writes
+                if tc.name in _DESTRUCTIVE_TOOLS and "[OK]" in result:
+                    target_path = tc.arguments.get("path", "")
+                    completed_writes.add(target_path)
+                    did_destructive = True
+
                 # Track denials
                 if "[DENIED]" in result:
                     any_denied = True
-                    # Give the agent a strong stop signal
                     result += (
                         "\n\n[IMPORTANT] The user DENIED this action. "
                         "Do NOT retry the same tool or a similar tool. "
@@ -202,6 +230,18 @@ class BaseAgent:
                     tool_call_id=tc.id,
                     name=tc.name,
                 ))
+
+            # After a successful destructive op, force a text summary
+            if did_destructive:
+                messages.append(Message(
+                    role=Role.USER,
+                    content=(
+                        "[SYSTEM] The file operation completed successfully. "
+                        "Respond with a brief confirmation. Do NOT write the file again."
+                    ),
+                ))
+                final = self.model.chat(messages=messages, tools=None)
+                return final.content
 
             # If the user denied tools, count consecutive denials
             if any_denied:

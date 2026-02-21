@@ -74,7 +74,7 @@ class AgentPipeline:
             for entry in recent:
                 context_lines.append(
                     f"[@{entry['agent']}] User asked: {entry['user']}\n"
-                    f"[@{entry['agent']}] Responded: {entry['response'][:500]}"
+                    f"[@{entry['agent']}] Responded: {entry['response'][:2000]}"
                 )
             context = "\n\n".join(context_lines)
             augmented_msg = (
